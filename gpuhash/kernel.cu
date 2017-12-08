@@ -8,8 +8,8 @@
 #include <iostream>
 #include "TimeInMs.h"
 
-#define THREADS_PER_BLOCK 24
-#define BLOCK_NUMBER 12
+#define THREADS_PER_BLOCK 256
+#define BLOCK_NUMBER 8
 
 struct CharLine
 {
@@ -24,7 +24,7 @@ struct HashedBlock
 	int hash;
 };
 
-cudaError_t hashDataCuda(char *data, unsigned int size, unsigned int *keyCols, unsigned int keyColsSize, int nodeCount, HashedBlock **hashedBlock);
+cudaError_t hashDataCuda(char *data, unsigned int size, unsigned int *keyCols, unsigned int keyColsSize, int nodeCount, HashedBlock **hashedBlock, unsigned int *lenght);
 
 __global__ 
 void hashKernel(int *keys, unsigned int size, unsigned int nodeCount, unsigned int *hash)
@@ -44,7 +44,7 @@ void parseKernel(char *data, unsigned int size, CharLine *lines, unsigned int * 
 	unsigned int index = threadIdx.x + blockIdx.x * blockDim.x;
 	unsigned int numThreads = blockDim.x * gridDim.x;
 	unsigned int lineCount = 0;
-	unsigned int chunkStop = index == numThreads ? size : minPositions[index + 1];
+	unsigned int chunkStop = index == numThreads-1 ? size : minPositions[index + 1];
 	unsigned int chunkStart = index == 0 ? 0 : minPositions[index];
 
 	if (chunkStart >= size) return;
@@ -158,13 +158,12 @@ void parseKeysKernel(char *data, unsigned int size, CharLine *lines, unsigned in
 }
 
 
-HashedBlock *HashData(char *data, unsigned int size, unsigned int *keyCols, unsigned int keyColsSize, int nodeCount)
+void HashData(char *data, unsigned int size, unsigned int *keyCols, unsigned int keyColsSize, int nodeCount, HashedBlock ** hashed_blocks, unsigned int *lenght)
 {
-	HashedBlock *hashedBlocks = nullptr;
-	cudaError_t cudaStatus = hashDataCuda(data, size, keyCols, keyColsSize, nodeCount, &hashedBlocks);
+	cudaError_t cudaStatus = hashDataCuda(data, size, keyCols, keyColsSize, nodeCount, hashed_blocks, lenght);
 	if (cudaStatus != cudaSuccess) {
 		fprintf(stderr, "hashDataCuda failed!");
-	return  new HashedBlock();
+		return;
 	}
 
 	// cudaDeviceReset must be called before exiting in order for profiling and
@@ -172,9 +171,8 @@ HashedBlock *HashData(char *data, unsigned int size, unsigned int *keyCols, unsi
 	cudaStatus = cudaDeviceReset();
 	if (cudaStatus != cudaSuccess) {
 		fprintf(stderr, "cudaDeviceReset failed!");
-	return  new HashedBlock();
+	return;
 	}
-	return hashedBlocks;
 }
 
 static void appendLineToFile(std::string filepath, std::string line)
@@ -197,7 +195,7 @@ int main()
 	unsigned int size = 0;
 	char * memblock;
 
-	std::ifstream file("region.tbl", std::ios::in | std::ios::binary | std::ios::ate);
+	std::ifstream file("orders.tbl", std::ios::in | std::ios::binary | std::ios::ate);
 	if (file.is_open())
 	{
 		size = file.tellg();
@@ -212,18 +210,21 @@ int main()
 		keys[0] = 0;
 
 		uint64 start_time = GetTimeMs64();
-		auto data = HashData(memblock, size, keys, 1, 4);
+		HashedBlock *data = nullptr;
+		unsigned int dataLen = 0;
+
+		HashData(memblock, size, keys, 1, 4, &data, &dataLen);
 		delete memblock;
 		std::cout << GetTimeMs64() - start_time << " ms" << std::endl;
 
-		for (int i = 0; i < 10001; i++)
+	/*	for (int i = 0; i < dataLen; i++)
 		{
 			auto filename = new char[20];
 			sprintf_s(filename, 20, "orders_%d.tbl\0", data[i].hash);
 			auto str = std::string(data[i].line, data[i].lenght);
 			auto name = new std::string(filename);
 			appendLineToFile(filename, str);
-		}
+		}*/
 
 	}
 	else std::cout << "Unable to open file";
@@ -232,7 +233,7 @@ int main()
     return 0;
 }
 
-cudaError_t hashDataCuda(char *data, unsigned int size, unsigned int *keyCols, unsigned int keyColsSize, int nodeCount, HashedBlock **hashedBlocks)
+cudaError_t hashDataCuda(char *data, unsigned int size, unsigned int *keyCols, unsigned int keyColsSize, int nodeCount, HashedBlock **hashedBlocks, unsigned int *lenght)
 {
 	char *dev_data = 0;
 	unsigned int *dev_keyCols = 0;
@@ -300,7 +301,7 @@ cudaError_t hashDataCuda(char *data, unsigned int size, unsigned int *keyCols, u
 	}
 
 
-	unsigned linesSize = 0;
+	unsigned linesSize = 1;
 	for (unsigned int i = 0; i < gpuThreadCount; i++)
 	{
 		linesSize += host_lineCounts[i];
@@ -448,6 +449,7 @@ cudaError_t hashDataCuda(char *data, unsigned int size, unsigned int *keyCols, u
 		}
 	}
 	*hashedBlocks = hashedBlock;
+	*lenght = linesSize;
 	std::cout << "SPLIT: " << GetTimeMs64() - start_time << " ms" << std::endl;
 
 	free(host_CharLines);
