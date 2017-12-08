@@ -8,8 +8,8 @@
 #include <iostream>
 #include "TimeInMs.h"
 
-#define THREADS_PER_BLOCK 64
-#define BLOCK_NUMBER 8
+#define THREADS_PER_BLOCK 24
+#define BLOCK_NUMBER 12
 
 struct CharLine
 {
@@ -26,12 +26,6 @@ struct HashedBlock
 
 cudaError_t hashDataCuda(char *data, unsigned int size, unsigned int *keyCols, unsigned int keyColsSize, int nodeCount, HashedBlock **hashedBlock);
 
-__device__ __host__
-inline unsigned int GetHash(int key, unsigned int nodeCount)
-{
-	return key % nodeCount;
-}
-
 __global__ 
 void hashKernel(int *keys, unsigned int size, unsigned int nodeCount, unsigned int *hash)
 {
@@ -40,30 +34,23 @@ void hashKernel(int *keys, unsigned int size, unsigned int nodeCount, unsigned i
 
 	for (unsigned int i = index; i < size; i += numThreads)
 	{
-		hash[i] = GetHash(keys[i], nodeCount);
+		hash[i] = keys[i] % nodeCount;
 	}
-   
 }
 
 __global__
-void parseKernel(char *data, unsigned int size, CharLine *lines, unsigned int linesCount, unsigned int * minPositions, unsigned int * linesCountPerChunk)
+void parseKernel(char *data, unsigned int size, CharLine *lines, unsigned int * minPositions, unsigned int * linesCountPerChunk)
 {
 	unsigned int index = threadIdx.x + blockIdx.x * blockDim.x;
 	unsigned int numThreads = blockDim.x * gridDim.x;
-	//unsigned int threadSkip = (numThreads + linesCount - 1) / linesCount;
-
-	//if (index % threadSkip != 0) return;
-	//if (linesCount < numThreads) 
-	//{
-	//	index = index / threadSkip;
-	//	numThreads = linesCount/2;
-	//}
-
 	unsigned int lineCount = 0;
 	unsigned int chunkStop = index == numThreads ? size : minPositions[index + 1];
 	unsigned int chunkStart = index == 0 ? 0 : minPositions[index];
+
+	if (chunkStart >= size) return;
+
 	unsigned int startIndex = 0;
-	if (index !=0)
+	if (index != 0)
 	{
 		for (int i = 0; i < index; i++)
 		{
@@ -71,11 +58,6 @@ void parseKernel(char *data, unsigned int size, CharLine *lines, unsigned int li
 		}
 		startIndex++;
 	}
-
-	//while (chunkStop < size && data[chunkStop] != '\n') chunkStop++;
-	//if (chunkStart != 0) 
-	//	while (data[chunkStart] != '\n' && chunkStart < chunkStop) chunkStart++;
-	//
 	unsigned int lastEnd = chunkStart;
 	for (unsigned int i = chunkStart; i < chunkStop; i++)
 	{
@@ -104,10 +86,11 @@ void CountLinesKernel(char *data, unsigned int size, unsigned int * linesCount, 
 	unsigned int numThreads = blockDim.x * gridDim.x;
 	unsigned int count = 0;
 	unsigned int minPosition = size;
-	unsigned int maxPosition = 0;
 	unsigned int chunk = (size + numThreads - 1) / numThreads;
+	unsigned int start = index*chunk;
+	unsigned int end = (index + 1)*chunk;
 
-	for (unsigned int i = index*chunk; i < (index + 1)*chunk && i < size; i++)
+	for (unsigned int i = start; i < end  && i < size; i++)
 	{
 		if (data[i] == '\n') {
 			count++;
@@ -122,8 +105,11 @@ void CountLinesKernel(char *data, unsigned int size, unsigned int * linesCount, 
 __global__
 void parseKeysKernel(char *data, unsigned int size, CharLine *lines, unsigned int linesSize, unsigned int *keyCols, unsigned int keyColsSize, int *keys)
 {
-	const unsigned int index = threadIdx.x + blockIdx.x * blockDim.x;
-	const unsigned int numThreads = blockDim.x * gridDim.x;
+	unsigned int index = threadIdx.x + blockIdx.x * blockDim.x;
+	unsigned int numThreads = blockDim.x * gridDim.x;
+
+	if (index >= linesSize) return;
+
 	unsigned int maxEnter = 0;
 	for (int k = 0; k < keyColsSize; k++)
 	{
@@ -135,13 +121,15 @@ void parseKeysKernel(char *data, unsigned int size, CharLine *lines, unsigned in
 
 	for (unsigned int i = index; i < linesSize; i += numThreads)
 	{
-		unsigned int enter = lines[i].start;
+		unsigned int lineStart = lines[i].start;
+		unsigned int lineEnd = lines[i].end;
+		unsigned int enter = lineStart;
 		unsigned int enterCount = 0;
-		for (unsigned int j = lines[i].start; j < lines[i].end; j++)
+		for (unsigned int j = lineStart; j < lineEnd; j++)
 		{
-			if (data[j] == '|' || j == lines[i].end - 1)
+			if (data[j] == '|' || j == lineEnd - 1)
 			{
-				unsigned int len = j - enter + (j == lines[i].end - 1 ? 1 : 0);
+				unsigned int len = j - enter + (j == lineEnd - 1 ? 1 : 0);
 				for (int k = 0; k < keyColsSize; k++)
 				{
 					if (keyCols[k] == enterCount)
@@ -209,7 +197,7 @@ int main()
 	unsigned int size = 0;
 	char * memblock;
 
-	std::ifstream file("supplier.tbl", std::ios::in | std::ios::binary | std::ios::ate);
+	std::ifstream file("region.tbl", std::ios::in | std::ios::binary | std::ios::ate);
 	if (file.is_open())
 	{
 		size = file.tellg();
@@ -311,11 +299,45 @@ cudaError_t hashDataCuda(char *data, unsigned int size, unsigned int *keyCols, u
 		goto Error;
 	}
 
-	unsigned linesSize = 1; //как минимум 1 строка есть
-	for (int i = 0; i < gpuThreadCount; i++)
+
+	unsigned linesSize = 0;
+	for (unsigned int i = 0; i < gpuThreadCount; i++)
 	{
 		linesSize += host_lineCounts[i];
 	}
+	if (linesSize < gpuThreadCount / 2)
+	{
+		unsigned int * host_minPositions = new unsigned[gpuThreadCount];
+		cudaStatus = cudaMemcpy(host_minPositions, dev_minPositions, gpuThreadCount * sizeof(unsigned int), cudaMemcpyDeviceToHost);
+		if (cudaStatus != cudaSuccess) {
+			fprintf(stderr, "cudaMemcpy failed!");
+			goto Error;
+		}
+
+		for (unsigned int i = 0, j = 0; i < gpuThreadCount; i++)
+		{
+			if (host_lineCounts[i] != 0)
+			{
+				host_lineCounts[j] = host_lineCounts[i];
+				host_minPositions[j] = host_minPositions[i];
+				host_lineCounts[i] = 0;
+				host_minPositions[i] = size;
+				j++;
+			}
+		}
+
+		cudaStatus = cudaMemcpy(dev_minPositions, host_minPositions, gpuThreadCount * sizeof(unsigned int), cudaMemcpyHostToDevice);
+		if (cudaStatus != cudaSuccess) {
+			fprintf(stderr, "cudaMemcpy failed!");
+			goto Error;
+		}
+		cudaStatus = cudaMemcpy(dev_lineCounts, host_lineCounts, gpuThreadCount * sizeof(unsigned int), cudaMemcpyHostToDevice);
+		if (cudaStatus != cudaSuccess) {
+			fprintf(stderr, "cudaMemcpy failed!");
+			goto Error;
+		}
+	}
+
 
 	cudaStatus = cudaMalloc((void**)&dev_keys, linesSize * sizeof(unsigned int));
 	if (cudaStatus != cudaSuccess) {
@@ -347,7 +369,7 @@ cudaError_t hashDataCuda(char *data, unsigned int size, unsigned int *keyCols, u
 		goto Error;
 	}
 		
-	parseKernel << <BLOCK_NUMBER, THREADS_PER_BLOCK >> >(dev_data, size, dev_CharLines, linesSize, dev_minPositions, dev_lineCounts);
+	parseKernel << <BLOCK_NUMBER, THREADS_PER_BLOCK >> >(dev_data, size, dev_CharLines, dev_minPositions, dev_lineCounts);
 
 	cudaStatus = cudaGetLastError();
 	if (cudaStatus != cudaSuccess) {
@@ -362,6 +384,14 @@ cudaError_t hashDataCuda(char *data, unsigned int size, unsigned int *keyCols, u
 	}
 	
 	parseKeysKernel << <BLOCK_NUMBER, THREADS_PER_BLOCK >> >(dev_data, size, dev_CharLines, linesSize, dev_keyCols, keyColsSize, dev_keys);
+
+	auto host_keys = new int[linesSize];
+
+	cudaStatus = cudaMemcpy(host_keys, dev_keys, linesSize * sizeof(int), cudaMemcpyDeviceToHost);
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "cudaMemcpy failed!");
+		goto Error;
+	}
 
 	cudaStatus = cudaGetLastError();
 	if (cudaStatus != cudaSuccess) {
