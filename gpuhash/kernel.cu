@@ -1,4 +1,5 @@
 
+#include "gpuhash.h"
 #include "cuda_runtime.h"
 #include "device_launch_parameters.h"
 
@@ -7,30 +8,14 @@
 #include <fstream>
 #include <iostream>
 #include "TimeInMs.h"
+#include "gpu_utils.cuh"
 
-#define THREADS_PER_BLOCK 256
-#define BLOCK_NUMBER 8
-
-struct CharLine
-{
-	unsigned int start;
-	unsigned int end;
-};
-
-struct HashedBlock
-{
-	char *line;
-	int lenght;
-	int hash;
-};
-
-cudaError_t hashDataCuda(char *data, unsigned int size, unsigned int *keyCols, unsigned int keyColsSize, int nodeCount, HashedBlock **hashedBlock, unsigned int *lenght);
 
 __global__ 
 void hashKernel(int *keys, unsigned int size, unsigned int nodeCount, unsigned int *hash)
 {
-	const unsigned int index = threadIdx.x + blockIdx.x * blockDim.x;
-	const unsigned int numThreads = blockDim.x * gridDim.x;
+	const unsigned int index = TID;
+	const unsigned int numThreads = THREAD_COUNT;
 
 	for (unsigned int i = index; i < size; i += numThreads)
 	{
@@ -41,8 +26,8 @@ void hashKernel(int *keys, unsigned int size, unsigned int nodeCount, unsigned i
 __global__
 void parseKernel(char *data, unsigned int size, CharLine *lines, unsigned int * minPositions, unsigned int * linesCountPerChunk)
 {
-	unsigned int index = threadIdx.x + blockIdx.x * blockDim.x;
-	unsigned int numThreads = blockDim.x * gridDim.x;
+	const unsigned int index = TID;
+	const unsigned int numThreads = THREAD_COUNT;
 	unsigned int lineCount = 0;
 	unsigned int chunkStop = index == numThreads-1 ? size : minPositions[index + 1];
 	unsigned int chunkStart = index == 0 ? 0 : minPositions[index];
@@ -82,8 +67,8 @@ void parseKernel(char *data, unsigned int size, CharLine *lines, unsigned int * 
 __global__
 void CountLinesKernel(char *data, unsigned int size, unsigned int * linesCount, unsigned int * minPositions)
 {
-	unsigned int index = threadIdx.x + blockIdx.x * blockDim.x;
-	unsigned int numThreads = blockDim.x * gridDim.x;
+	const unsigned int index = TID;
+	const unsigned int numThreads = THREAD_COUNT;
 	unsigned int count = 0;
 	unsigned int minPosition = size;
 	unsigned int chunk = (size + numThreads - 1) / numThreads;
@@ -105,8 +90,8 @@ void CountLinesKernel(char *data, unsigned int size, unsigned int * linesCount, 
 __global__
 void parseKeysKernel(char *data, unsigned int size, CharLine *lines, unsigned int linesSize, unsigned int *keyCols, unsigned int keyColsSize, int *keys)
 {
-	unsigned int index = threadIdx.x + blockIdx.x * blockDim.x;
-	unsigned int numThreads = blockDim.x * gridDim.x;
+	const unsigned int index = TID;
+	const unsigned int numThreads = THREAD_COUNT;
 
 	if (index >= linesSize) return;
 
@@ -160,19 +145,7 @@ void parseKeysKernel(char *data, unsigned int size, CharLine *lines, unsigned in
 
 void HashData(char *data, unsigned int size, unsigned int *keyCols, unsigned int keyColsSize, int nodeCount, HashedBlock ** hashed_blocks, unsigned int *lenght)
 {
-	cudaError_t cudaStatus = hashDataCuda(data, size, keyCols, keyColsSize, nodeCount, hashed_blocks, lenght);
-	if (cudaStatus != cudaSuccess) {
-		fprintf(stderr, "hashDataCuda failed!");
-		return;
-	}
-
-	// cudaDeviceReset must be called before exiting in order for profiling and
-	// tracing tools such as Nsight and Visual Profiler to show complete traces.
-	cudaStatus = cudaDeviceReset();
-	if (cudaStatus != cudaSuccess) {
-		fprintf(stderr, "cudaDeviceReset failed!");
-	return;
-	}
+	hashDataCuda(data, size, keyCols, keyColsSize, nodeCount, hashed_blocks, lenght);
 }
 
 static void appendLineToFile(std::string filepath, std::string line)
@@ -217,14 +190,14 @@ int main()
 		delete memblock;
 		std::cout << GetTimeMs64() - start_time << " ms" << std::endl;
 
-	/*	for (int i = 0; i < dataLen; i++)
+		for (int i = 0; i < dataLen; i++)
 		{
 			auto filename = new char[20];
 			sprintf_s(filename, 20, "orders_%d.tbl\0", data[i].hash);
 			auto str = std::string(data[i].line, data[i].lenght);
 			auto name = new std::string(filename);
 			appendLineToFile(filename, str);
-		}*/
+		}
 
 	}
 	else std::cout << "Unable to open file";
@@ -233,74 +206,34 @@ int main()
     return 0;
 }
 
-cudaError_t hashDataCuda(char *data, unsigned int size, unsigned int *keyCols, unsigned int keyColsSize, int nodeCount, HashedBlock **hashedBlocks, unsigned int *lenght)
+void hashDataCuda(char *data, unsigned int size, unsigned int *keyCols, unsigned int keyColsSize, int nodeCount, HashedBlock **hashedBlocks, unsigned int *lenght)
 {
-	char *dev_data = 0;
-	unsigned int *dev_keyCols = 0;
-	CharLine *dev_CharLines = 0;
-	int *dev_keys = 0;
-	unsigned int *dev_lineCounts = 0;
-	unsigned int *dev_hash = 0;
-	unsigned int *dev_minPositions = 0;
-	unsigned int *host_hash = 0;
-	CharLine *host_CharLines = 0;
-	unsigned int gpuThreadCount = BLOCK_NUMBER * THREADS_PER_BLOCK;
-	cudaError_t cudaStatus;
+	unsigned int *dev_lineCounts;
+	unsigned int *dev_minPositions;
+	unsigned int gpuThreadCount;
 
 	uint64 start_time = GetTimeMs64();
 
-	cudaStatus = cudaSetDevice(0);
-	if (cudaStatus != cudaSuccess) {
-		fprintf(stderr, "cudaSetDevice failed!  Do you have a CUDA-capable GPU installed?");
-		goto Error;
-	}
+	dim3 blockDim(256, 1, 1);
+	dim3 gridDim(1, 1, 1);
+	THREAD_CONF(gridDim, blockDim, BLOCK_NUMBER, THREADS_PER_BLOCK);
+	gpuThreadCount = THREAD_COUNT;
 
-	cudaStatus = cudaMalloc((void**)&dev_lineCounts, gpuThreadCount * sizeof(unsigned int));
-	if (cudaStatus != cudaSuccess) {
-		fprintf(stderr, "cudaMalloc failed!");
-		goto Error;
-	}
+	CUDA_SAFE_CALL(cudaSetDevice(0));
 
-	cudaStatus = cudaMalloc((void**)&dev_minPositions, gpuThreadCount * sizeof(unsigned int));
-	if (cudaStatus != cudaSuccess) {
-		fprintf(stderr, "cudaMalloc failed!");
-		goto Error;
-	}
-
-	cudaStatus = cudaMalloc((void**)&dev_data, size * sizeof(unsigned int));
-	if (cudaStatus != cudaSuccess) {
-		fprintf(stderr, "cudaMalloc failed!");
-		goto Error;
-	}
+	gcStream_t s;
+	gc_stream_start(&s);
 	
-	cudaStatus = cudaMemcpy(dev_data, data, size * sizeof(char), cudaMemcpyHostToDevice);
-	if (cudaStatus != cudaSuccess) {
-		fprintf(stderr, "cudaMemcpy failed!");
-		goto Error;
-	}
+	dev_lineCounts = (unsigned int *)gc_malloc(gpuThreadCount * sizeof(unsigned int));
+	dev_minPositions = (unsigned int *)gc_malloc(gpuThreadCount * sizeof(unsigned int));
+	char *dev_data = (char *)gc_host2device(s, data, size * sizeof(char));
+		
+	CountLinesKernel << <gridDim, blockDim, 0, (cudaStream_t)s.stream >> >(dev_data, size, dev_lineCounts, dev_minPositions);
+	CUT_CHECK_ERROR("CountLinesKernel");
 	
-	CountLinesKernel << <BLOCK_NUMBER, THREADS_PER_BLOCK >> >(dev_data, size, dev_lineCounts, dev_minPositions);
-
-	cudaStatus = cudaGetLastError();
-	if (cudaStatus != cudaSuccess) {
-		fprintf(stderr, "parseKernel launch failed: %s\n", cudaGetErrorString(cudaStatus));
-		goto Error;
-	}
-
-	cudaStatus = cudaDeviceSynchronize();
-	if (cudaStatus != cudaSuccess) {
-		fprintf(stderr, "cudaDeviceSynchronize returned error code %d after launching parseKernel!\n", cudaStatus);
-		goto Error;
-	}
-
-	unsigned int * host_lineCounts = new unsigned[gpuThreadCount];
-	cudaStatus = cudaMemcpy(host_lineCounts, dev_lineCounts, gpuThreadCount * sizeof(unsigned int), cudaMemcpyDeviceToHost);
-	if (cudaStatus != cudaSuccess) {
-		fprintf(stderr, "cudaMemcpy failed!");
-		goto Error;
-	}
-
-
+	unsigned int * host_lineCounts = (unsigned int *)gc_device2host(s, dev_lineCounts, gpuThreadCount * sizeof(unsigned int));
+	gc_stream_wait(&s);
+	
 	unsigned linesSize = 1;
 	for (unsigned int i = 0; i < gpuThreadCount; i++)
 	{
@@ -308,13 +241,9 @@ cudaError_t hashDataCuda(char *data, unsigned int size, unsigned int *keyCols, u
 	}
 	if (linesSize < gpuThreadCount / 2)
 	{
-		unsigned int * host_minPositions = new unsigned[gpuThreadCount];
-		cudaStatus = cudaMemcpy(host_minPositions, dev_minPositions, gpuThreadCount * sizeof(unsigned int), cudaMemcpyDeviceToHost);
-		if (cudaStatus != cudaSuccess) {
-			fprintf(stderr, "cudaMemcpy failed!");
-			goto Error;
-		}
-
+		unsigned int * host_minPositions = (unsigned int *)gc_device2host(s, dev_minPositions, gpuThreadCount * sizeof(unsigned int));
+		gc_stream_wait(&s);
+	
 		for (unsigned int i = 0, j = 0; i < gpuThreadCount; i++)
 		{
 			if (host_lineCounts[i] != 0)
@@ -326,114 +255,40 @@ cudaError_t hashDataCuda(char *data, unsigned int size, unsigned int *keyCols, u
 				j++;
 			}
 		}
-
-		cudaStatus = cudaMemcpy(dev_minPositions, host_minPositions, gpuThreadCount * sizeof(unsigned int), cudaMemcpyHostToDevice);
-		if (cudaStatus != cudaSuccess) {
-			fprintf(stderr, "cudaMemcpy failed!");
-			goto Error;
-		}
-		cudaStatus = cudaMemcpy(dev_lineCounts, host_lineCounts, gpuThreadCount * sizeof(unsigned int), cudaMemcpyHostToDevice);
-		if (cudaStatus != cudaSuccess) {
-			fprintf(stderr, "cudaMemcpy failed!");
-			goto Error;
-		}
+		CUDA_SAFE_CALL(cudaMemcpy(dev_minPositions, host_minPositions, gpuThreadCount * sizeof(unsigned int), cudaMemcpyHostToDevice));
+		CUDA_SAFE_CALL(cudaMemcpy(dev_lineCounts, host_lineCounts, gpuThreadCount * sizeof(unsigned int), cudaMemcpyHostToDevice));
+		free(host_minPositions);
 	}
+	cudaFreeHost(host_lineCounts);
 
-
-	cudaStatus = cudaMalloc((void**)&dev_keys, linesSize * sizeof(unsigned int));
-	if (cudaStatus != cudaSuccess) {
-		fprintf(stderr, "cudaMalloc failed!");
-		goto Error;
-	}
-
-	cudaStatus = cudaMalloc((void**)&dev_hash, linesSize * sizeof(unsigned int));
-	if (cudaStatus != cudaSuccess) {
-		fprintf(stderr, "cudaMalloc failed!");
-		goto Error;
-	}
-
-	cudaStatus = cudaMalloc((void**)&dev_keyCols, keyColsSize * sizeof(unsigned int));
-	if (cudaStatus != cudaSuccess) {
-		fprintf(stderr, "cudaMalloc failed!");
-		goto Error;
-	}
-
-	cudaStatus = cudaMalloc((void**)&dev_CharLines, linesSize * sizeof(CharLine));
-	if (cudaStatus != cudaSuccess) {
-		fprintf(stderr, "cudaMalloc failed!");
-		goto Error;
-	}
-
-	cudaStatus = cudaMemcpy(dev_keyCols, keyCols, keyColsSize * sizeof(char), cudaMemcpyHostToDevice);
-	if (cudaStatus != cudaSuccess) {
-		fprintf(stderr, "cudaMemcpy failed!");
-		goto Error;
-	}
+	int *dev_keys = (int *)gc_malloc(linesSize * sizeof(int));
+	unsigned int *dev_hash = (unsigned int *)gc_malloc(linesSize * sizeof(unsigned int));
+	CharLine *dev_CharLines = (CharLine *)gc_malloc(linesSize * sizeof(CharLine));
+	unsigned int *dev_keyCols = (unsigned int *)gc_host2device(s, keyCols, keyColsSize * sizeof(unsigned int));
+			
+	parseKernel << <gridDim, blockDim, 0, (cudaStream_t)s.stream >> >(dev_data, size, dev_CharLines, dev_minPositions, dev_lineCounts);
+	CUT_CHECK_ERROR("parseKernel");
 		
-	parseKernel << <BLOCK_NUMBER, THREADS_PER_BLOCK >> >(dev_data, size, dev_CharLines, dev_minPositions, dev_lineCounts);
-
-	cudaStatus = cudaGetLastError();
-	if (cudaStatus != cudaSuccess) {
-		fprintf(stderr, "parseKernel launch failed: %s\n", cudaGetErrorString(cudaStatus));
-		goto Error;
-	}
-
-	cudaStatus = cudaDeviceSynchronize();
-	if (cudaStatus != cudaSuccess) {
-		fprintf(stderr, "cudaDeviceSynchronize returned error code %d after launching parseKernel!\n", cudaStatus);
-		goto Error;
-	}
+	parseKeysKernel << <gridDim, blockDim, 0, (cudaStream_t)s.stream >> >(dev_data, size, dev_CharLines, linesSize, dev_keyCols, keyColsSize, dev_keys);
+	CUT_CHECK_ERROR("parseKernel");
 	
-	parseKeysKernel << <BLOCK_NUMBER, THREADS_PER_BLOCK >> >(dev_data, size, dev_CharLines, linesSize, dev_keyCols, keyColsSize, dev_keys);
-
-	auto host_keys = new int[linesSize];
-
-	cudaStatus = cudaMemcpy(host_keys, dev_keys, linesSize * sizeof(int), cudaMemcpyDeviceToHost);
-	if (cudaStatus != cudaSuccess) {
-		fprintf(stderr, "cudaMemcpy failed!");
-		goto Error;
-	}
-
-	cudaStatus = cudaGetLastError();
-	if (cudaStatus != cudaSuccess) {
-		fprintf(stderr, "parseKeysKernel launch failed: %s\n", cudaGetErrorString(cudaStatus));
-		goto Error;
-	}
+	hashKernel << <gridDim, blockDim, 0, (cudaStream_t)s.stream >> >(dev_keys, linesSize, nodeCount, dev_hash);
+	CUT_CHECK_ERROR("hashKernel");
 	
-	cudaStatus = cudaDeviceSynchronize();
-	if (cudaStatus != cudaSuccess) {
-		fprintf(stderr, "cudaDeviceSynchronize returned error code %d after launching parseKeysKernel!\n", cudaStatus);
-		goto Error;
-	}
+	unsigned int * host_hash = (unsigned int *)gc_device2host(s, dev_hash, linesSize * sizeof(unsigned int));
+	CharLine * host_CharLines = (CharLine *)gc_device2host(s, dev_CharLines, linesSize * sizeof(CharLine));
 
-	hashKernel << <BLOCK_NUMBER, THREADS_PER_BLOCK >> >(dev_keys, linesSize, nodeCount, dev_hash);
+	gc_stream_wait(&s);
+	gc_stream_stop(&s);
 
-	cudaStatus = cudaGetLastError();
-	if (cudaStatus != cudaSuccess) {
-		fprintf(stderr, "hashKernel launch failed: %s\n", cudaGetErrorString(cudaStatus));
-		goto Error;
-	}
+	gc_free(dev_data);
+	gc_free(dev_keyCols);
+	gc_free(dev_CharLines);
+	gc_free(dev_keys);
+	gc_free(dev_lineCounts);
+	gc_free(dev_hash);
+	gc_free(dev_minPositions);
 
-	cudaStatus = cudaDeviceSynchronize();
-	if (cudaStatus != cudaSuccess) {
-		fprintf(stderr, "cudaDeviceSynchronize returned error code %d after launching hashKernel!\n", cudaStatus);
-		goto Error;
-	}
-	
-
-	host_hash = new unsigned[linesSize];
-	cudaStatus = cudaMemcpy(host_hash, dev_hash, linesSize * sizeof(unsigned int), cudaMemcpyDeviceToHost);
-	if (cudaStatus != cudaSuccess) {
-		fprintf(stderr, "cudaMemcpy failed!");
-		goto Error;
-	}
-
-	host_CharLines = new CharLine[linesSize];
-	cudaStatus = cudaMemcpy(host_CharLines, dev_CharLines, linesSize * sizeof(CharLine), cudaMemcpyDeviceToHost);
-	if (cudaStatus != cudaSuccess) {
-		fprintf(stderr, "cudaMemcpy failed!");
-		goto Error;
-	}
 	std::cout << "GPU: " << GetTimeMs64() - start_time << " ms" << std::endl;
 
 	start_time = GetTimeMs64();
@@ -452,16 +307,6 @@ cudaError_t hashDataCuda(char *data, unsigned int size, unsigned int *keyCols, u
 	*lenght = linesSize;
 	std::cout << "SPLIT: " << GetTimeMs64() - start_time << " ms" << std::endl;
 
-	free(host_CharLines);
-	free(host_hash);
-
-
-Error:
-	cudaFree(dev_data);
-	cudaFree(dev_keyCols);
-	cudaFree(dev_CharLines);
-	cudaFree(dev_keys);
-	cudaFree(dev_hash);
-
-	return cudaStatus;
+	cudaFreeHost(host_CharLines);
+	cudaFreeHost(host_hash);
 }
