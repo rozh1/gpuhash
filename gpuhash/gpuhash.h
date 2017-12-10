@@ -22,12 +22,6 @@
 #define THREADS_PER_BLOCK 256
 #define BLOCK_NUMBER 8
 
-struct CharLine
-{
-	unsigned int start;
-	unsigned int end;
-};
-
 struct HashedBlock
 {
 	char *line;

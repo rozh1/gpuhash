@@ -1,15 +1,24 @@
-
 #include "gpuhash.h"
 #include "cuda_runtime.h"
 #include "device_launch_parameters.h"
-
 #include <stdio.h>
-#include <istream>
-#include <fstream>
-#include <iostream>
-#include "TimeInMs.h"
+
 #include "gpu_utils.cuh"
 
+//#define TIMETRACE
+
+#ifdef TIMETRACE
+#include <istream>
+#include <iostream>
+#include "TimeInMs.h"
+#endif
+
+
+struct CharLine
+{
+	unsigned int start;
+	unsigned int end;
+};
 
 __global__ 
 void hashKernel(int *keys, unsigned int size, unsigned int nodeCount, unsigned int *hash)
@@ -88,7 +97,7 @@ void CountLinesKernel(char *data, unsigned int size, unsigned int * linesCount, 
 }
 
 __global__
-void parseKeysKernel(char *data, unsigned int size, CharLine *lines, unsigned int linesSize, unsigned int *keyCols, unsigned int keyColsSize, int *keys)
+void parseKeysKernel(char *data, unsigned int size, CharLine *lines, unsigned int linesSize, unsigned int *keyCols, unsigned int keyColsSize, unsigned int nodeCount, unsigned int *hash)
 {
 	const unsigned int index = TID;
 	const unsigned int numThreads = THREAD_COUNT;
@@ -96,6 +105,7 @@ void parseKeysKernel(char *data, unsigned int size, CharLine *lines, unsigned in
 	if (index >= linesSize) return;
 
 	unsigned int maxEnter = 0;
+	int hashSum = 0;
 	for (int k = 0; k < keyColsSize; k++)
 	{
 		if (keyCols[k] > maxEnter)
@@ -103,6 +113,8 @@ void parseKeysKernel(char *data, unsigned int size, CharLine *lines, unsigned in
 			maxEnter = keyCols[k];
 		}
 	}
+
+	int* keys = new int[keyColsSize];
 
 	for (unsigned int i = index; i < linesSize; i += numThreads)
 	{
@@ -131,7 +143,7 @@ void parseKeysKernel(char *data, unsigned int size, CharLine *lines, unsigned in
 							if (data[l] >= '0' && data[l] <= '9')
 								key = key * 10 + (data[l] - 48);
 						}
-						keys[i] = key;
+						keys[k] = key;
 					}
 				}
 				enter = j + 1;
@@ -139,71 +151,12 @@ void parseKeysKernel(char *data, unsigned int size, CharLine *lines, unsigned in
 			}
 			if (enterCount > maxEnter) break;
 		}
-	}
-}
-
-
-void HashData(char *data, unsigned int size, unsigned int *keyCols, unsigned int keyColsSize, int nodeCount, HashedBlock ** hashed_blocks, unsigned int *lenght)
-{
-	hashDataCuda(data, size, keyCols, keyColsSize, nodeCount, hashed_blocks, lenght);
-}
-
-static void appendLineToFile(std::string filepath, std::string line)
-{
-	std::ofstream file;
-	//can't enable exception now because of gcc bug that raises ios_base::failure with useless message
-	//file.exceptions(file.exceptions() | std::ios::failbit);
-	file.open(filepath, std::ios::out | std::ios::app);
-	if (file.fail())
-		throw std::ios_base::failure(std::strerror(errno));
-
-	//make sure write fails with exception if something is wrong
-	file.exceptions(file.exceptions() | std::ios::failbit | std::ifstream::badbit);
-
-	file << line.c_str() << std::endl;
-}
-
-int main()
-{
-	unsigned int size = 0;
-	char * memblock;
-
-	std::ifstream file("orders.tbl", std::ios::in | std::ios::binary | std::ios::ate);
-	if (file.is_open())
-	{
-		size = file.tellg();
-		memblock = new char[size];
-		file.seekg(0, std::ios::beg);
-		file.read(memblock, size);
-		file.close();
-
-		std::cout << "the entire file content is in memory";
-
-		unsigned int* keys = new unsigned[1];
-		keys[0] = 0;
-
-		uint64 start_time = GetTimeMs64();
-		HashedBlock *data = nullptr;
-		unsigned int dataLen = 0;
-
-		HashData(memblock, size, keys, 1, 4, &data, &dataLen);
-		delete memblock;
-		std::cout << GetTimeMs64() - start_time << " ms" << std::endl;
-
-		for (int i = 0; i < dataLen; i++)
+		for (int k = 0; k < keyColsSize; k++)
 		{
-			auto filename = new char[20];
-			sprintf_s(filename, 20, "orders_%d.tbl\0", data[i].hash);
-			auto str = std::string(data[i].line, data[i].lenght);
-			auto name = new std::string(filename);
-			appendLineToFile(filename, str);
+			hashSum += keys[k] % nodeCount;
 		}
-
+		hash[i] = hashSum % nodeCount;
 	}
-	else std::cout << "Unable to open file";
-	
-
-    return 0;
 }
 
 void hashDataCuda(char *data, unsigned int size, unsigned int *keyCols, unsigned int keyColsSize, int nodeCount, HashedBlock **hashedBlocks, unsigned int *lenght)
@@ -212,9 +165,10 @@ void hashDataCuda(char *data, unsigned int size, unsigned int *keyCols, unsigned
 	unsigned int *dev_minPositions;
 	unsigned int gpuThreadCount;
 
+#ifdef TIMETRACE
 	uint64 start_time = GetTimeMs64();
-
-	dim3 blockDim(256, 1, 1);
+#endif
+	dim3 blockDim(THREADS_PER_BLOCK, 1, 1);
 	dim3 gridDim(1, 1, 1);
 	THREAD_CONF(gridDim, blockDim, BLOCK_NUMBER, THREADS_PER_BLOCK);
 	gpuThreadCount = THREAD_COUNT;
@@ -269,11 +223,11 @@ void hashDataCuda(char *data, unsigned int size, unsigned int *keyCols, unsigned
 	parseKernel << <gridDim, blockDim, 0, (cudaStream_t)s.stream >> >(dev_data, size, dev_CharLines, dev_minPositions, dev_lineCounts);
 	CUT_CHECK_ERROR("parseKernel");
 		
-	parseKeysKernel << <gridDim, blockDim, 0, (cudaStream_t)s.stream >> >(dev_data, size, dev_CharLines, linesSize, dev_keyCols, keyColsSize, dev_keys);
+	parseKeysKernel << <gridDim, blockDim, 0, (cudaStream_t)s.stream >> >(dev_data, size, dev_CharLines, linesSize, dev_keyCols, keyColsSize, nodeCount, dev_hash);
 	CUT_CHECK_ERROR("parseKernel");
 	
-	hashKernel << <gridDim, blockDim, 0, (cudaStream_t)s.stream >> >(dev_keys, linesSize, nodeCount, dev_hash);
-	CUT_CHECK_ERROR("hashKernel");
+	//hashKernel << <gridDim, blockDim, 0, (cudaStream_t)s.stream >> >(dev_keys, linesSize, nodeCount, dev_hash);
+	//CUT_CHECK_ERROR("hashKernel");
 	
 	unsigned int * host_hash = (unsigned int *)gc_device2host(s, dev_hash, linesSize * sizeof(unsigned int));
 	CharLine * host_CharLines = (CharLine *)gc_device2host(s, dev_CharLines, linesSize * sizeof(CharLine));
@@ -289,9 +243,10 @@ void hashDataCuda(char *data, unsigned int size, unsigned int *keyCols, unsigned
 	gc_free(dev_hash);
 	gc_free(dev_minPositions);
 
+#ifdef TIMETRACE
 	std::cout << "GPU: " << GetTimeMs64() - start_time << " ms" << std::endl;
-
 	start_time = GetTimeMs64();
+#endif
 	HashedBlock* hashedBlock = new HashedBlock[linesSize];
 	for (unsigned int i = 0; i < linesSize; i++)
 	{
@@ -305,8 +260,9 @@ void hashDataCuda(char *data, unsigned int size, unsigned int *keyCols, unsigned
 	}
 	*hashedBlocks = hashedBlock;
 	*lenght = linesSize;
+#ifdef TIMETRACE
 	std::cout << "SPLIT: " << GetTimeMs64() - start_time << " ms" << std::endl;
-
+#endif
 	cudaFreeHost(host_CharLines);
 	cudaFreeHost(host_hash);
 }
