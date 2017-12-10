@@ -159,7 +159,7 @@ void parseKeysKernel(char *data, unsigned int size, CharLine *lines, unsigned in
 	}
 }
 
-void hashDataCuda(char *data, unsigned int size, unsigned int *keyCols, unsigned int keyColsSize, int nodeCount, HashedBlock **hashedBlocks, unsigned int *lenght)
+void CGpuHash::hashDataCuda(char *data, unsigned int size, unsigned int *keyCols, unsigned int keyColsSize, int nodeCount, HashedBlock **hashedBlocks, unsigned int *lenght)
 {
 	unsigned int *dev_lineCounts;
 	unsigned int *dev_minPositions;
@@ -173,7 +173,7 @@ void hashDataCuda(char *data, unsigned int size, unsigned int *keyCols, unsigned
 	THREAD_CONF(gridDim, blockDim, BLOCK_NUMBER, THREADS_PER_BLOCK);
 	gpuThreadCount = THREAD_COUNT;
 
-	CUDA_SAFE_CALL(cudaSetDevice(0));
+	CUDA_SAFE_CALL(cudaSetDevice(CGpuHash::GpuNumber));
 
 	gcStream_t s;
 	gc_stream_start(&s);

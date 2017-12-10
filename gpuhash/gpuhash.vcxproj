@@ -153,11 +153,12 @@ copy "$(CudaToolkitBinDir)\cudart*.dll" "$(OutDir)"</Command>
   </ItemDefinitionGroup>
   <ItemGroup>
     <CudaCompile Include="gpu_utils.cu" />
-    <CudaCompile Include="kernel.cu">
+    <CudaCompile Include="gpuhash.cu">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</ExcludedFromBuild>
     </CudaCompile>
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="gpuhash_api.cpp" />
     <ClCompile Include="TimeInMs.cpp" />
   </ItemGroup>
   <ItemGroup>

@@ -29,13 +29,39 @@ struct HashedBlock
 	int hash;
 };
 
+
+class GPUHASHDLL_API CGpuHash {
+public:
+	CGpuHash(int gpuNumber);
+	void HashData(char *data, unsigned int size, unsigned int *keyCols, unsigned int keyColsSize, int nodeCount, HashedBlock **hashedBlock, unsigned int *lenght);
+	void hashDataCuda(char *data, unsigned int size, unsigned int *keyCols, unsigned int keyColsSize, int nodeCount, HashedBlock **hashedBlock, unsigned int *lenght);
+	int GpuNumber;
+};
+
 //====================================================
 //APIs
 //====================================================
 BEGIN_C_DECLS
+inline
+GPUHASHDLL_API void HashDataWithGPU(void* handle, char* data, unsigned int size, unsigned int* keyCols, unsigned int keyColsSize, int nodeCount, HashedBlock** hashedBlock, unsigned int* lenght)
+{
+	auto *selHandle = (CGpuHash*)handle;
+	return selHandle->HashData(data, size, keyCols, keyColsSize, nodeCount, hashedBlock, lenght);
+}
 
-GPUHASHDLL_API
-void hashDataCuda(char *data, unsigned int size, unsigned int *keyCols, unsigned int keyColsSize, int nodeCount, HashedBlock **hashedBlock, unsigned int *lenght);
+inline
+GPUHASHDLL_API void* INIT(int gpuNumber)
+{
+	return new CGpuHash(gpuNumber);
+}
+
+inline
+GPUHASHDLL_API void DESTROY(void* handle)
+{
+	auto *selHandle = (CGpuHash*)handle;
+	delete selHandle;
+}
+
 
 END_C_DECLS
 

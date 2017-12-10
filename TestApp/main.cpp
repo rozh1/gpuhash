@@ -7,7 +7,9 @@
 
 void HashData(char *data, unsigned int size, unsigned int *keyCols, unsigned int keyColsSize, int nodeCount, HashedBlock ** hashed_blocks, unsigned int *lenght)
 {
-	hashDataCuda(data, size, keyCols, keyColsSize, nodeCount, hashed_blocks, lenght);
+	auto handle = INIT(0);
+	HashDataWithGPU(handle, data, size, keyCols, keyColsSize, nodeCount, hashed_blocks, lenght);
+	DESTROY(handle);
 }
 
 static void appendLineToFile(std::string filepath, std::string line)
