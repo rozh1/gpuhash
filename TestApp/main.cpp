@@ -1,8 +1,8 @@
 
 #include <iostream>
 #include <fstream>
-#include "../gpuhash/gpuhash.h"
 #include "TimeInMs.h"
+#include "../gpuhash/gpuhash.h"
 
 
 void HashData(char *data, unsigned int size, unsigned int *keyCols, unsigned int keyColsSize, int nodeCount, HashedBlock ** hashed_blocks, unsigned int *lenght)
@@ -45,20 +45,21 @@ int main()
 		std::cout << "the entire file content is in memory" << std::endl;
 
 		unsigned int* keys = new unsigned[1];
-		keys[0] = 0;
+		keys[0] = 4;
 
 		uint64 start_time = GetTimeMs64();
+
 		HashedBlock *data = nullptr;
 		unsigned int dataLen = 0;
+		for (int i = 0; i < 1000; i++)
+			HashData(memblock, size, keys, 1, 4, &data, &dataLen);
 
-		HashData(memblock, size, keys, 1, 4, &data, &dataLen);
-		delete memblock;
 		std::cout << GetTimeMs64() - start_time << " ms" << std::endl;
 
 		//for (int i = 0; i < dataLen; i++)
 		//{
 		//	auto filename = new char[20];
-		//	sprintf_s(filename, 20, "orders_%d.tbl\0", data[i].hash);
+		//	sprintf_s(filename, 50, "c6997abd-f7e7-4e55-a301-67a901af23eb_3_%d\0", data[i].hash);
 		//	auto str = std::string(data[i].line, data[i].lenght);
 		//	auto name = new std::string(filename);
 		//	appendLineToFile(filename, str);

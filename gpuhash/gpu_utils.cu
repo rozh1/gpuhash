@@ -1,6 +1,5 @@
 #include "gpu_utils.cuh"
 #include "cuda_runtime.h"
-#include "device_launch_parameters.h"
 
 
 //=============================================================================
@@ -22,7 +21,7 @@ void* gc_host2device(gcStream_t Stream, void* cpu_buf, size_t bufsize)
 {
 	void* gpu_buf = NULL;
 
-	int round_bufsize = CEIL(bufsize, 16) * 16 + 4;
+	unsigned int round_bufsize = CEIL(bufsize, 16) * 16 + 4;
 
 	CUDA_SAFE_CALL(cudaMalloc((void**)&gpu_buf, round_bufsize));
 	CUDA_SAFE_CALL(cudaMemcpy(gpu_buf, cpu_buf, bufsize, cudaMemcpyHostToDevice));

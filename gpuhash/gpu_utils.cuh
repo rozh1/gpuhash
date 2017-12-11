@@ -39,7 +39,7 @@
     }                                                                        \
     err = CUT_DEVICE_SYNCHRONIZE();                                           \
     if( cudaSuccess != err) {                                                \
-        fprintf(stderr, "Cuda error: %s in file '%s' in line %i : %s.\n",    \
+        fprintf(stderr, "Cuda error after sync: %s in file '%s' in line %i : %s.\n",    \
                 errorMessage, __FILE__, __LINE__, cudaGetErrorString( err) );\
         exit(EXIT_FAILURE);                                                  \
     }                                                                        \
@@ -72,9 +72,9 @@ inline void __cutilGetLastError( const char *errorMessage, const char *file, con
 //====================================================
 typedef struct
 {
-	int *stream;
-	int *event;
-	int *start;
+	void *stream;
+	void *event;
+	void *start;
 } gcStream_t;
 
 //-----------------------------------------------------

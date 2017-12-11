@@ -156,6 +156,7 @@ void parseKeysKernel(char *data, unsigned int size, CharLine *lines, unsigned in
 			hashSum += keys[k] % nodeCount;
 		}
 		hash[i] = hashSum % nodeCount;
+		hashSum = 0;
 	}
 }
 
@@ -174,13 +175,14 @@ void CGpuHash::hashDataCuda(char *data, unsigned int size, unsigned int *keyCols
 	gpuThreadCount = THREAD_COUNT;
 
 	CUDA_SAFE_CALL(cudaSetDevice(CGpuHash::GpuNumber));
+	CUDA_SAFE_CALL(cudaDeviceReset());
 
 	gcStream_t s;
 	gc_stream_start(&s);
 	
 	dev_lineCounts = (unsigned int *)gc_malloc(gpuThreadCount * sizeof(unsigned int));
 	dev_minPositions = (unsigned int *)gc_malloc(gpuThreadCount * sizeof(unsigned int));
-	char *dev_data = (char *)gc_host2device(s, data, size * sizeof(char));
+	auto dev_data = (char *)gc_host2device(s, data, size * sizeof(char));
 		
 	CountLinesKernel << <gridDim, blockDim, 0, (cudaStream_t)s.stream >> >(dev_data, size, dev_lineCounts, dev_minPositions);
 	CUT_CHECK_ERROR("CountLinesKernel");
@@ -211,7 +213,7 @@ void CGpuHash::hashDataCuda(char *data, unsigned int size, unsigned int *keyCols
 		}
 		CUDA_SAFE_CALL(cudaMemcpy(dev_minPositions, host_minPositions, gpuThreadCount * sizeof(unsigned int), cudaMemcpyHostToDevice));
 		CUDA_SAFE_CALL(cudaMemcpy(dev_lineCounts, host_lineCounts, gpuThreadCount * sizeof(unsigned int), cudaMemcpyHostToDevice));
-		free(host_minPositions);
+		cudaFreeHost(host_minPositions);
 	}
 	cudaFreeHost(host_lineCounts);
 
@@ -242,24 +244,41 @@ void CGpuHash::hashDataCuda(char *data, unsigned int size, unsigned int *keyCols
 	gc_free(dev_lineCounts);
 	gc_free(dev_hash);
 	gc_free(dev_minPositions);
-
+	
 #ifdef TIMETRACE
 	std::cout << "GPU: " << GetTimeMs64() - start_time << " ms" << std::endl;
 	start_time = GetTimeMs64();
 #endif
-	HashedBlock* hashedBlock = new HashedBlock[linesSize];
+	HashedBlock* hashedBlock = new HashedBlock[nodeCount];
+	int* startIndexes = new int[nodeCount];
+
+	for (unsigned int i = 0; i < nodeCount; i++)
+	{
+		hashedBlock[i].lenght = 0;
+		startIndexes[i] = 0;
+	}
 	for (unsigned int i = 0; i < linesSize; i++)
 	{
-		hashedBlock[i].hash = host_hash[i];
-		hashedBlock[i].lenght = host_CharLines[i].end - host_CharLines[i].start;
+		hashedBlock[host_hash[i]].hash = host_hash[i];
+		hashedBlock[host_hash[i]].lenght += host_CharLines[i].end - host_CharLines[i].start + 1;
+	}
+	for (unsigned int i = 0; i < nodeCount; i++)
+	{
 		hashedBlock[i].line = new char[hashedBlock[i].lenght];
-		for (unsigned int j = host_CharLines[i].start, k = 0; j < host_CharLines[i].end; j++, k++)
+	}
+	for (unsigned int i = 0; i < linesSize; i++)
+	{
+		auto nodeIndex = host_hash[i];
+		unsigned int k = startIndexes[nodeIndex];
+		for (unsigned int j = host_CharLines[i].start; j < host_CharLines[i].end; j++, k++)
 		{
-			hashedBlock[i].line[k] = data[j];
+			hashedBlock[nodeIndex].line[k] = data[j];
 		}
+		hashedBlock[nodeIndex].line[k] = '\n';
+		startIndexes[nodeIndex] += host_CharLines[i].end - host_CharLines[i].start + 1;
 	}
 	*hashedBlocks = hashedBlock;
-	*lenght = linesSize;
+	*lenght = nodeCount;
 #ifdef TIMETRACE
 	std::cout << "SPLIT: " << GetTimeMs64() - start_time << " ms" << std::endl;
 #endif

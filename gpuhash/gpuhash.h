@@ -46,7 +46,7 @@ inline
 GPUHASHDLL_API void HashDataWithGPU(void* handle, char* data, unsigned int size, unsigned int* keyCols, unsigned int keyColsSize, int nodeCount, HashedBlock** hashedBlock, unsigned int* lenght)
 {
 	auto *selHandle = (CGpuHash*)handle;
-	return selHandle->HashData(data, size, keyCols, keyColsSize, nodeCount, hashedBlock, lenght);
+    selHandle->HashData(data, size, keyCols, keyColsSize, nodeCount, hashedBlock, lenght);
 }
 
 inline
