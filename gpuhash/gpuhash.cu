@@ -257,6 +257,12 @@ void CGpuHash::hashDataCuda(char *data, unsigned int size, unsigned int *keyCols
 		hashedBlock[i].lenght = 0;
 		startIndexes[i] = 0;
 	}
+
+	if (host_CharLines[linesSize - 1].end - host_CharLines[linesSize - 1].start == 0)
+	{
+		linesSize--; //костыль для удаления последней пустой строки
+	}
+
 	for (unsigned int i = 0; i < linesSize; i++)
 	{
 		hashedBlock[host_hash[i]].hash = host_hash[i];

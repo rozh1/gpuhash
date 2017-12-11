@@ -33,7 +33,7 @@ int main()
 	unsigned int size = 0;
 	char * memblock;
 
-	std::ifstream file("orders.tbl", std::ios::in | std::ios::binary | std::ios::ate);
+	std::ifstream file("region.tbl", std::ios::in | std::ios::binary | std::ios::ate);
 	if (file.is_open())
 	{
 		size = file.tellg();
@@ -45,7 +45,7 @@ int main()
 		std::cout << "the entire file content is in memory" << std::endl;
 
 		unsigned int* keys = new unsigned[1];
-		keys[0] = 4;
+		keys[0] = 0;
 
 		uint64 start_time = GetTimeMs64();
 
