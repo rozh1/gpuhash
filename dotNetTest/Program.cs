@@ -50,6 +50,7 @@ namespace dotNetTest
                 var buffer = new byte[datablock.Length];
                 Marshal.Copy(datablock.Data, buffer, 0, buffer.Length);
                 resultData.Add(buffer);
+                Marshal.FreeHGlobal(datablock.Data);
                 Marshal.DestroyStructure(blockPointers[i], typeof(HashedBlock));
             }
 
@@ -61,8 +62,11 @@ namespace dotNetTest
         static void Main(string[] args)
         {
             var test = new Program();
-            var data = test.ProcessData(File.ReadAllBytes("orders.tbl"), 4, new int[1] { 0 });
-            
+            for (int index = 0; index < 100; index++)
+            {
+                test.ProcessData(File.ReadAllBytes("orders.tbl"), 4, new int[1] { 0 });
+            }
+            GC.Collect();
         }
     }
 }

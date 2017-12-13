@@ -213,9 +213,9 @@ void CGpuHash::hashDataCuda(char *data, unsigned int size, unsigned int *keyCols
 		}
 		CUDA_SAFE_CALL(cudaMemcpy(dev_minPositions, host_minPositions, gpuThreadCount * sizeof(unsigned int), cudaMemcpyHostToDevice));
 		CUDA_SAFE_CALL(cudaMemcpy(dev_lineCounts, host_lineCounts, gpuThreadCount * sizeof(unsigned int), cudaMemcpyHostToDevice));
-		cudaFreeHost(host_minPositions);
+		CUDA_SAFE_CALL(cudaFreeHost(host_minPositions));
 	}
-	cudaFreeHost(host_lineCounts);
+	CUDA_SAFE_CALL(cudaFreeHost(host_lineCounts));
 
 	int *dev_keys = (int *)gc_malloc(linesSize * sizeof(int));
 	unsigned int *dev_hash = (unsigned int *)gc_malloc(linesSize * sizeof(unsigned int));
@@ -258,7 +258,7 @@ void CGpuHash::hashDataCuda(char *data, unsigned int size, unsigned int *keyCols
 		startIndexes[i] = 0;
 	}
 
-	if (host_CharLines[linesSize - 1].end - host_CharLines[linesSize - 1].start == 0)
+	if (host_CharLines[linesSize - 1].end - host_CharLines[linesSize - 1].start <= 0)
 	{
 		linesSize--; //костыль для удаления последней пустой строки
 	}
@@ -288,6 +288,6 @@ void CGpuHash::hashDataCuda(char *data, unsigned int size, unsigned int *keyCols
 #ifdef TIMETRACE
 	std::cout << "SPLIT: " << GetTimeMs64() - start_time << " ms" << std::endl;
 #endif
-	cudaFreeHost(host_CharLines);
-	cudaFreeHost(host_hash);
+	CUDA_SAFE_CALL(cudaFreeHost(host_CharLines));
+	CUDA_SAFE_CALL(cudaFreeHost(host_hash));
 }

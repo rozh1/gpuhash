@@ -33,7 +33,7 @@ int main()
 	unsigned int size = 0;
 	char * memblock;
 
-	std::ifstream file("region.tbl", std::ios::in | std::ios::binary | std::ios::ate);
+	std::ifstream file("orders.tbl", std::ios::in | std::ios::binary | std::ios::ate);
 	if (file.is_open())
 	{
 		size = file.tellg();
@@ -49,11 +49,21 @@ int main()
 
 		uint64 start_time = GetTimeMs64();
 
-		HashedBlock *data = nullptr;
+		HashedBlock* data = nullptr;
 		unsigned int dataLen = 0;
-		for (int i = 0; i < 1000; i++)
+		for (int i = 0; i < 10; i++)
+		{
 			HashData(memblock, size, keys, 1, 4, &data, &dataLen);
 
+			for (int j = 0; j < dataLen; j++)
+			{
+				auto block = data[j];
+				free(block.line);
+			}
+
+			free(data);
+			data = nullptr;
+		}
 		std::cout << GetTimeMs64() - start_time << " ms" << std::endl;
 
 		//for (int i = 0; i < dataLen; i++)

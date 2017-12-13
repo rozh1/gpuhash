@@ -58,8 +58,8 @@ GPUHASHDLL_API void* INIT(int gpuNumber)
 inline
 GPUHASHDLL_API void DESTROY(void* handle)
 {
-	auto *selHandle = (CGpuHash*)handle;
-	delete selHandle;
+	auto *curHandle = (CGpuHash*)handle;
+	delete curHandle;
 }
 
 
