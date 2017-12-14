@@ -258,7 +258,8 @@ void CGpuHash::hashDataCuda(char *data, unsigned int size, unsigned int *keyCols
 		startIndexes[i] = 0;
 	}
 
-	if (host_CharLines[linesSize - 1].end - host_CharLines[linesSize - 1].start <= 0)
+	if (host_CharLines[linesSize - 1].end - host_CharLines[linesSize - 1].start <= 0 || 
+		host_CharLines[linesSize - 1].end >= size)
 	{
 		linesSize--; //костыль для удаления последней пустой строки
 	}
