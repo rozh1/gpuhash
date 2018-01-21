@@ -190,7 +190,7 @@ void CGpuHash::hashDataCuda(char *data, unsigned int size, unsigned int *keyCols
 	unsigned int * host_lineCounts = (unsigned int *)gc_device2host(s, dev_lineCounts, gpuThreadCount * sizeof(unsigned int));
 	gc_stream_wait(&s);
 	
-	unsigned linesSize = 1;
+	unsigned linesSize = 0;
 	for (unsigned int i = 0; i < gpuThreadCount; i++)
 	{
 		linesSize += host_lineCounts[i];
@@ -258,11 +258,11 @@ void CGpuHash::hashDataCuda(char *data, unsigned int size, unsigned int *keyCols
 		startIndexes[i] = 0;
 	}
 
-	if (host_CharLines[linesSize - 1].end - host_CharLines[linesSize - 1].start <= 0 || 
-		host_CharLines[linesSize - 1].end >= size)
-	{
-		linesSize--; //костыль для удаления последней пустой строки
-	}
+	//if (host_CharLines[linesSize - 1].end - host_CharLines[linesSize - 1].start <= 0 || 
+	//	host_CharLines[linesSize - 1].end >= size)
+	//{
+	//	linesSize--; //костыль для удаления последней пустой строки
+	//}
 
 	for (unsigned int i = 0; i < linesSize; i++)
 	{

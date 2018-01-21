@@ -24,7 +24,7 @@ static void appendLineToFile(std::string filepath, std::string line)
 	//make sure write fails with exception if something is wrong
 	file.exceptions(file.exceptions() | std::ios::failbit | std::ifstream::badbit);
 
-	file << line.c_str() << std::endl;
+	file << line.c_str();
 }
 
 
@@ -33,7 +33,7 @@ int main()
 	unsigned int size = 0;
 	char * memblock;
 
-	std::ifstream file("orders.tbl", std::ios::in | std::ios::binary | std::ios::ate);
+	std::ifstream file("region.tbl", std::ios::in | std::ios::binary | std::ios::ate);
 	if (file.is_open())
 	{
 		size = file.tellg();
@@ -51,7 +51,7 @@ int main()
 
 		HashedBlock* data = nullptr;
 		unsigned int dataLen = 0;
-		for (int i = 0; i < 10; i++)
+		/*for (int i = 0; i < 10; i++)
 		{
 			HashData(memblock, size, keys, 1, 4, &data, &dataLen);
 
@@ -63,17 +63,18 @@ int main()
 
 			free(data);
 			data = nullptr;
-		}
+		}*/
+		HashData(memblock, size, keys, 1, 4, &data, &dataLen);
 		std::cout << GetTimeMs64() - start_time << " ms" << std::endl;
 
-		//for (int i = 0; i < dataLen; i++)
-		//{
-		//	auto filename = new char[20];
-		//	sprintf_s(filename, 50, "c6997abd-f7e7-4e55-a301-67a901af23eb_3_%d\0", data[i].hash);
-		//	auto str = std::string(data[i].line, data[i].lenght);
-		//	auto name = new std::string(filename);
-		//	appendLineToFile(filename, str);
-		//}
+		for (int i = 0; i < dataLen; i++)
+		{
+			auto filename = new char[20];
+			sprintf_s(filename, 50, "region_%d\0", data[i].hash);
+			auto str = std::string(data[i].line, data[i].lenght);
+			auto name = new std::string(filename);
+			appendLineToFile(filename, str);
+		}
 
 	}
 	else std::cout << "Unable to open file";
