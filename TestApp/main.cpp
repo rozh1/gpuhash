@@ -49,7 +49,7 @@ int main()
 	unsigned int size = 0;
 	char * memblock;
 
-	std::ifstream file("region.tbl", std::ios::in | std::ios::binary | std::ios::ate);
+	std::ifstream file("orders.tbl", std::ios::in | std::ios::binary | std::ios::ate);
 	if (file.is_open())
 	{
 		size = file.tellg();
@@ -80,13 +80,13 @@ int main()
 			free(data);
 			data = nullptr;
 		}*/
-		HashData(memblock, size, keys, 1, 4, &data, &dataLen);
+		HashData(memblock, size, keys, 1, 40, &data, &dataLen);
 		std::cout << GetTimeMs64() - start_time << " ms" << std::endl;
 
 		for (int i = 0; i < dataLen; i++)
 		{
 			auto filename = new char[20];
-			sprintf_s(filename, 50, "region_%d\0", data[i].hash);
+			sprintf_s(filename, 20, "orders_%d\0", data[i].hash);
 			auto str = std::string(data[i].line, data[i].lenght);
 			auto name = new std::string(filename);
 			appendLineToFile(filename, str);

@@ -22,11 +22,9 @@
 
 #include "gpu_utils.cuh"
 
-//#define TIMETRACE
+#define TIMETRACE
 
 #ifdef TIMETRACE
-#include <istream>
-#include <iostream>
 #include "TimeInMs.h"
 #endif
 
@@ -190,6 +188,7 @@ void CGpuHash::hashDataCuda(char *data, unsigned int size, unsigned int *keyCols
 	dim3 gridDim(1, 1, 1);
 	THREAD_CONF(gridDim, blockDim, BLOCK_NUMBER, THREADS_PER_BLOCK);
 	gpuThreadCount = THREAD_COUNT;
+	printf("gpuThreadCount:  %d \n", gpuThreadCount);
 
 	CUDA_SAFE_CALL(cudaSetDevice(CGpuHash::GpuNumber));
 	CUDA_SAFE_CALL(cudaDeviceReset());
@@ -263,7 +262,7 @@ void CGpuHash::hashDataCuda(char *data, unsigned int size, unsigned int *keyCols
 	gc_free(dev_minPositions);
 	
 #ifdef TIMETRACE
-	std::cout << "GPU: " << GetTimeMs64() - start_time << " ms" << std::endl;
+	printf("GPU:  %I64d ms \n", (GetTimeMs64() - start_time));
 	start_time = GetTimeMs64();
 #endif
 	HashedBlock* hashedBlock = new HashedBlock[nodeCount];
@@ -304,7 +303,7 @@ void CGpuHash::hashDataCuda(char *data, unsigned int size, unsigned int *keyCols
 	*hashedBlocks = hashedBlock;
 	*lenght = nodeCount;
 #ifdef TIMETRACE
-	std::cout << "SPLIT: " << GetTimeMs64() - start_time << " ms" << std::endl;
+	printf("SPLIT:  %I64d ms \n", (GetTimeMs64() - start_time));
 #endif
 	CUDA_SAFE_CALL(cudaFreeHost(host_CharLines));
 	CUDA_SAFE_CALL(cudaFreeHost(host_hash));
