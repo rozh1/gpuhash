@@ -50,7 +50,12 @@ class GPUHASHDLL_API CGpuHash {
 public:
 	CGpuHash(int gpuNumber);
 	void HashData(char *data, unsigned int size, unsigned int *keyCols, unsigned int keyColsSize, int nodeCount, HashedBlock **hashedBlock, unsigned int *lenght);
+	void hashDataWithCuda(char *data, unsigned int size, unsigned int *keyCols, unsigned int keyColsSize, int nodeCount, HashedBlock **hashedBlocks, unsigned int *lenght, int algo);
 	void hashDataCuda(char *data, unsigned int size, unsigned int *keyCols, unsigned int keyColsSize, int nodeCount, HashedBlock **hashedBlock, unsigned int *lenght);
+	void hashIntCrcCuda(char *data, unsigned int size, unsigned int *keyCols, unsigned int keyColsSize, int nodeCount, HashedBlock **hashedBlock, unsigned int *lenght);
+	void hashCrcCuda(char *data, unsigned int size, unsigned int *keyCols, unsigned int keyColsSize, int nodeCount, HashedBlock **hashedBlock, unsigned int *lenght);
+	void hashIntMurMurCuda(char *data, unsigned int size, unsigned int *keyCols, unsigned int keyColsSize, int nodeCount, HashedBlock **hashedBlock, unsigned int *lenght);
+	void hashMurMurCuda(char *data, unsigned int size, unsigned int *keyCols, unsigned int keyColsSize, int nodeCount, HashedBlock **hashedBlock, unsigned int *lenght);
 	int GpuNumber;
 };
 
@@ -63,6 +68,34 @@ GPUHASHDLL_API void HashDataWithGPU(void* handle, char* data, unsigned int size,
 {
 	auto *selHandle = (CGpuHash*)handle;
     selHandle->HashData(data, size, keyCols, keyColsSize, nodeCount, hashedBlock, lenght);
+}
+
+inline
+GPUHASHDLL_API void HashIntCRC(void* handle, char* data, unsigned int size, unsigned int* keyCols, unsigned int keyColsSize, int nodeCount, HashedBlock** hashedBlock, unsigned int* lenght)
+{
+	auto *selHandle = (CGpuHash*)handle;
+    selHandle->hashIntCrcCuda(data, size, keyCols, keyColsSize, nodeCount, hashedBlock, lenght);
+}
+
+inline
+GPUHASHDLL_API void HashCRC(void* handle, char* data, unsigned int size, unsigned int* keyCols, unsigned int keyColsSize, int nodeCount, HashedBlock** hashedBlock, unsigned int* lenght)
+{
+	auto *selHandle = (CGpuHash*)handle;
+    selHandle->hashCrcCuda(data, size, keyCols, keyColsSize, nodeCount, hashedBlock, lenght);
+}
+
+inline
+GPUHASHDLL_API void HashIntMurMur(void* handle, char* data, unsigned int size, unsigned int* keyCols, unsigned int keyColsSize, int nodeCount, HashedBlock** hashedBlock, unsigned int* lenght)
+{
+	auto *selHandle = (CGpuHash*)handle;
+    selHandle->hashIntMurMurCuda(data, size, keyCols, keyColsSize, nodeCount, hashedBlock, lenght);
+}
+
+inline
+GPUHASHDLL_API void HashMurMur(void* handle, char* data, unsigned int size, unsigned int* keyCols, unsigned int keyColsSize, int nodeCount, HashedBlock** hashedBlock, unsigned int* lenght)
+{
+	auto *selHandle = (CGpuHash*)handle;
+    selHandle->hashMurMurCuda(data, size, keyCols, keyColsSize, nodeCount, hashedBlock, lenght);
 }
 
 inline

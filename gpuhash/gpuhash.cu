@@ -1,5 +1,5 @@
 /*
-* Copyright 2017-2018 Roman Klassen
+* Copyright 2021 Roman Klassen
 *
 * Licensed under the Apache License, Version 2.0 (the "License"); you may not
 * use this file except in compliance with the License. You may obtain a copy
@@ -21,6 +21,7 @@
 #include <stdio.h>
 
 #include "gpu_utils.cuh"
+#include "hash_algs.cuh"
 
 #define TIMETRACE
 
@@ -34,18 +35,6 @@ struct CharLine
 	unsigned int start;
 	unsigned int end;
 };
-
-__global__ 
-void hashKernel(int *keys, unsigned int size, unsigned int nodeCount, unsigned int *hash)
-{
-	const unsigned int index = TID;
-	const unsigned int numThreads = THREAD_COUNT;
-
-	for (unsigned int i = index; i < size; i += numThreads)
-	{
-		hash[i] = keys[i] % nodeCount;
-	}
-}
 
 __global__
 void parseKernel(char *data, unsigned int size, CharLine *lines, unsigned int * minPositions, unsigned int * linesCountPerChunk)
@@ -112,7 +101,7 @@ void CountLinesKernel(char *data, unsigned int size, unsigned int * linesCount, 
 }
 
 __global__
-void parseKeysKernel(char *data, unsigned int size, CharLine *lines, unsigned int linesSize, unsigned int *keyCols, unsigned int keyColsSize, unsigned int nodeCount, unsigned int *hash)
+void parseAndHashKeysKernel(char *data, unsigned int size, CharLine *lines, unsigned int linesSize, unsigned int *keyCols, unsigned int keyColsSize, unsigned int nodeCount, unsigned int *hash, int algo)
 {
 	const unsigned int index = TID;
 	const unsigned int numThreads = THREAD_COUNT;
@@ -166,16 +155,104 @@ void parseKeysKernel(char *data, unsigned int size, CharLine *lines, unsigned in
 			}
 			if (enterCount > maxEnter) break;
 		}
-		for (int k = 0; k < keyColsSize; k++)
+		char buf[4*4];
+		switch (algo)
 		{
-			hashSum += keys[k] % nodeCount;
+			case 2:
+				for (int k = 0; k < keyColsSize && k < 4; k++)
+				{
+					for (int i = 0; i < 4; i++)
+						buf[i*4 + 3 - i] = (keys[k] >> (i * 8));
+				}
+				hashSum = CRC32(buf, keyColsSize*4);
+				break;
+			case 4:
+				for (int k = 0; k < keyColsSize && k < 4; k++)
+				{
+					for (int i = 0; i < 4; i++)
+						buf[i*4 + 3 - i] = (keys[k] >> (i * 8));
+				}
+				hashSum = MurMurHash(buf, keyColsSize*4);
+				break;
+			case 0:
+			default:
+				for (int k = 0; k < keyColsSize; k++)
+				{
+					hashSum += keys[k] % nodeCount;
+				}
+				break;
 		}
 		hash[i] = hashSum % nodeCount;
 		hashSum = 0;
 	}
 }
 
-void CGpuHash::hashDataCuda(char *data, unsigned int size, unsigned int *keyCols, unsigned int keyColsSize, int nodeCount, HashedBlock **hashedBlocks, unsigned int *lenght)
+__global__
+void parseBytesAndHashKeysKernel(char *data, unsigned int size, CharLine *lines, unsigned int linesSize, unsigned int *keyCols, unsigned int keyColsSize, unsigned int nodeCount, unsigned int *hash, int algo)
+{
+	const unsigned int index = TID;
+	const unsigned int numThreads = THREAD_COUNT;
+
+	if (index >= linesSize) return;
+
+	unsigned int maxEnter = 0;
+	for (int k = 0; k < keyColsSize; k++)
+	{
+		if (keyCols[k] > maxEnter)
+		{
+			maxEnter = keyCols[k];
+		}
+	}
+
+	int* keys = new int[keyColsSize];
+	
+	char buf[256];
+	for (unsigned int i = index; i < linesSize; i += numThreads)
+	{
+		unsigned int lineStart = lines[i].start;
+		unsigned int lineEnd = lines[i].end;
+		unsigned int enter = lineStart;
+		unsigned int enterCount = 0;
+		unsigned int bufIndex = 0;
+		for (unsigned int j = lineStart; j < lineEnd; j++)
+		{
+			if (data[j] == '|' || j == lineEnd - 1)
+			{
+				unsigned int len = j - enter + (j == lineEnd - 1 ? 1 : 0);
+				for (int k = 0; k < keyColsSize; k++)
+				{
+					if (keyCols[k] == enterCount)
+					{
+						int key = 0;
+						int numberLen = enter + len;
+						for (int l = enter; l < numberLen; l++)
+						{
+							if (data[l] == '\"') continue;
+							buf[bufIndex++] = data[l];
+							j++;
+						}
+						keys[k] = key;
+					}
+				}
+				enter = j + 1;
+				enterCount++;
+			}
+			if (enterCount > maxEnter) break;
+		}
+		switch (algo)
+		{
+			case 1:
+				hash[i] = CRC32(buf, bufIndex-1) % nodeCount;
+				break;
+			case 3:
+				hash[i] = MurMurHash(buf, bufIndex-1) % nodeCount;
+				break;
+		}
+	}
+}
+
+
+void CGpuHash::hashDataWithCuda(char *data, unsigned int size, unsigned int *keyCols, unsigned int keyColsSize, int nodeCount, HashedBlock **hashedBlocks, unsigned int *lenght, int algo)
 {
 	unsigned int *dev_lineCounts;
 	unsigned int *dev_minPositions;
@@ -238,15 +315,39 @@ void CGpuHash::hashDataCuda(char *data, unsigned int size, unsigned int *keyCols
 	CharLine *dev_CharLines = (CharLine *)gc_malloc(linesSize * sizeof(CharLine));
 	unsigned int *dev_keyCols = (unsigned int *)gc_host2device(s, keyCols, keyColsSize * sizeof(unsigned int));
 			
-	parseKernel << <gridDim, blockDim, 0, (cudaStream_t)s.stream >> >(dev_data, size, dev_CharLines, dev_minPositions, dev_lineCounts);
+	parseKernel <<<gridDim, blockDim, 0, (cudaStream_t)s.stream>>>(dev_data, size, dev_CharLines, dev_minPositions, dev_lineCounts);
 	CUT_CHECK_ERROR("parseKernel");
+	
+	printf("Algo:  %d \n", algo);
+	switch (algo)
+	{
+		case 0:
+			printf("start kernel: parseAndHashKeysKernel for MOD HASH \n");
+			parseAndHashKeysKernel <<<gridDim, blockDim, 0, (cudaStream_t)s.stream>>>(dev_data, size, dev_CharLines, linesSize, dev_keyCols, keyColsSize, nodeCount, dev_hash, algo);
+			CUT_CHECK_ERROR("parseAndHashKeysKernel");
+		break;
+		case 1:
+			printf("start kernel: parseBytesAndHashKeysKernel for CRC HASH \n");
+			parseBytesAndHashKeysKernel<<<gridDim, blockDim, 0, (cudaStream_t)s.stream>>>(dev_data, size, dev_CharLines, linesSize, dev_keyCols, keyColsSize, nodeCount, dev_hash, algo);
+			CUT_CHECK_ERROR("parseBytesAndHashKeysKernel");
+		break;
+		case 2:
+			printf("start kernel: parseAndHashKeysKernel for INT CRC HASH \n");
+			parseAndHashKeysKernel<<<gridDim, blockDim, 0, (cudaStream_t)s.stream>>>(dev_data, size, dev_CharLines, linesSize, dev_keyCols, keyColsSize, nodeCount, dev_hash, algo);
+			CUT_CHECK_ERROR("parseAndHashKeysKernel");
+		break;
+		case 3:
+			printf("start kernel: parseBytesAndHashKeysKernel for MurMur HASH \n");
+			parseBytesAndHashKeysKernel<<<gridDim, blockDim, 0, (cudaStream_t)s.stream>>>(dev_data, size, dev_CharLines, linesSize, dev_keyCols, keyColsSize, nodeCount, dev_hash, algo);
+			CUT_CHECK_ERROR("parseBytesAndHashKeysKernel");
+		break;
+		case 4:
+			printf("start kernel: parseAndHashKeysKernel for INT MurMur HASH \n");
+			parseAndHashKeysKernel<<<gridDim, blockDim, 0, (cudaStream_t)s.stream>>>(dev_data, size, dev_CharLines, linesSize, dev_keyCols, keyColsSize, nodeCount, dev_hash, algo);
+			CUT_CHECK_ERROR("parseAndHashKeysKernel");
+		break;
+	}
 		
-	parseKeysKernel << <gridDim, blockDim, 0, (cudaStream_t)s.stream >> >(dev_data, size, dev_CharLines, linesSize, dev_keyCols, keyColsSize, nodeCount, dev_hash);
-	CUT_CHECK_ERROR("parseKernel");
-	
-	//hashKernel << <gridDim, blockDim, 0, (cudaStream_t)s.stream >> >(dev_keys, linesSize, nodeCount, dev_hash);
-	//CUT_CHECK_ERROR("hashKernel");
-	
 	unsigned int * host_hash = (unsigned int *)gc_device2host(s, dev_hash, linesSize * sizeof(unsigned int));
 	CharLine * host_CharLines = (CharLine *)gc_device2host(s, dev_CharLines, linesSize * sizeof(CharLine));
 
@@ -273,12 +374,6 @@ void CGpuHash::hashDataCuda(char *data, unsigned int size, unsigned int *keyCols
 		hashedBlock[i].lenght = 0;
 		startIndexes[i] = 0;
 	}
-
-	//if (host_CharLines[linesSize - 1].end - host_CharLines[linesSize - 1].start <= 0 || 
-	//	host_CharLines[linesSize - 1].end >= size)
-	//{
-	//	linesSize--; //костыль для удаления последней пустой строки
-	//}
 
 	for (unsigned int i = 0; i < linesSize; i++)
 	{
@@ -307,4 +402,31 @@ void CGpuHash::hashDataCuda(char *data, unsigned int size, unsigned int *keyCols
 #endif
 	CUDA_SAFE_CALL(cudaFreeHost(host_CharLines));
 	CUDA_SAFE_CALL(cudaFreeHost(host_hash));
+}
+
+
+
+void CGpuHash::hashDataCuda(char* data, unsigned size, unsigned* keyCols, unsigned keyColsSize, int nodeCount, HashedBlock** hashedBlock, unsigned* lenght)
+{
+	hashDataWithCuda(data, size, keyCols, keyColsSize, nodeCount, hashedBlock, lenght, 0);
+}
+
+void CGpuHash::hashCrcCuda(char* data, unsigned size, unsigned* keyCols, unsigned keyColsSize, int nodeCount, HashedBlock** hashedBlock, unsigned* lenght)
+{
+	hashDataWithCuda(data, size, keyCols, keyColsSize, nodeCount, hashedBlock, lenght, 1);
+}
+
+void CGpuHash::hashIntCrcCuda(char* data, unsigned size, unsigned* keyCols, unsigned keyColsSize, int nodeCount, HashedBlock** hashedBlock, unsigned* lenght)
+{
+	hashDataWithCuda(data, size, keyCols, keyColsSize, nodeCount, hashedBlock, lenght, 2);
+}
+
+void CGpuHash::hashMurMurCuda(char* data, unsigned size, unsigned* keyCols, unsigned keyColsSize, int nodeCount, HashedBlock** hashedBlock, unsigned* lenght)
+{
+	hashDataWithCuda(data, size, keyCols, keyColsSize, nodeCount, hashedBlock, lenght, 3);
+}
+
+void CGpuHash::hashIntMurMurCuda(char* data, unsigned size, unsigned* keyCols, unsigned keyColsSize, int nodeCount, HashedBlock** hashedBlock, unsigned* lenght)
+{
+	hashDataWithCuda(data, size, keyCols, keyColsSize, nodeCount, hashedBlock, lenght, 4);
 }

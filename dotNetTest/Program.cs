@@ -85,6 +85,8 @@ namespace dotNetTest
                 test.ProcessData(File.ReadAllBytes("orders.tbl"), 4, new int[1] { 0 });
             }
             GC.Collect();
+            Console.WriteLine("Done");
+            Console.ReadKey();
         }
     }
 }

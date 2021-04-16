@@ -24,7 +24,7 @@
 void HashData(char *data, unsigned int size, unsigned int *keyCols, unsigned int keyColsSize, int nodeCount, HashedBlock ** hashed_blocks, unsigned int *lenght)
 {
 	auto handle = INIT(0);
-	HashDataWithGPU(handle, data, size, keyCols, keyColsSize, nodeCount, hashed_blocks, lenght);
+	HashIntMurMur(handle, data, size, keyCols, keyColsSize, nodeCount, hashed_blocks, lenght);
 	DESTROY(handle);
 }
 
@@ -80,7 +80,7 @@ int main()
 			free(data);
 			data = nullptr;
 		}*/
-		HashData(memblock, size, keys, 1, 40, &data, &dataLen);
+		HashData(memblock, size, keys, 1, 4, &data, &dataLen);
 		std::cout << GetTimeMs64() - start_time << " ms" << std::endl;
 
 		for (int i = 0; i < dataLen; i++)
