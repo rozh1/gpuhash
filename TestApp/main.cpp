@@ -24,7 +24,7 @@
 void HashData(char *data, unsigned int size, unsigned int *keyCols, unsigned int keyColsSize, int nodeCount, HashedBlock ** hashed_blocks, unsigned int *lenght)
 {
 	auto handle = INIT(0);
-	HashIntMurMur(handle, data, size, keyCols, keyColsSize, nodeCount, hashed_blocks, lenght);
+	HashMurMur(handle, data, size, keyCols, keyColsSize, nodeCount, hashed_blocks, lenght);
 	DESTROY(handle);
 }
 

@@ -242,10 +242,10 @@ void parseBytesAndHashKeysKernel(char *data, unsigned int size, CharLine *lines,
 		switch (algo)
 		{
 			case 1:
-				hash[i] = CRC32(buf, bufIndex-1) % nodeCount;
+				hash[i] = CRC32(buf, bufIndex) % nodeCount;
 				break;
 			case 3:
-				hash[i] = MurMurHash(buf, bufIndex-1) % nodeCount;
+				hash[i] = MurMurHash(buf, bufIndex) % nodeCount;
 				break;
 		}
 	}
