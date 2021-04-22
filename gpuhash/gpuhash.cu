@@ -159,18 +159,18 @@ void parseAndHashKeysKernel(char *data, unsigned int size, CharLine *lines, unsi
 		switch (algo)
 		{
 			case 2:
-				for (int k = 0; k < keyColsSize && k < 4; k++)
+				for (int k = 0; k < keyColsSize && k < 8; k++)
 				{
 					for (int i = 0; i < 4; i++)
-						buf[i*4 + 3 - i] = (keys[k] >> (i * 8));
+						buf[k*4 + 3 - i] = (keys[k] >> (i * 8));
 				}
 				hashSum = CRC32(buf, keyColsSize*4);
 				break;
 			case 4:
-				for (int k = 0; k < keyColsSize && k < 4; k++)
+				for (int k = 0; k < keyColsSize && k < 8; k++)
 				{
 					for (int i = 0; i < 4; i++)
-						buf[i*4 + 3 - i] = (keys[k] >> (i * 8));
+						buf[k*4 + 3 - i] = (keys[k] >> (i * 8));
 				}
 				hashSum = MurMurHash(buf, keyColsSize*4);
 				break;
